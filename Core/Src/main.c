@@ -48,10 +48,15 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-char uart_rx_buffer[UART_BUFFER_SIZE];	/* Menyimpan data yang diterima dari UART */
-volatile uint8_t data_ready = 0;		/* Memastikan apakah ada data yang diterima */
+volatile uint8_t uart_rx_byte; // Buffer untuk menerima byte per byte
+volatile uint8_t uart_rx_buffer[UART_BUFFER_SIZE]; // Buffer untuk menyimpan string
+volatile uint16_t uart_rx_index = 0; // Indeks buffer
+volatile uint8_t data_ready = 0; // Flag data siap
 
 uint32_t last_blink_time = 0;
+
+int size = 4;
+char *array[4];
 
 /* USER CODE END PV */
 
@@ -61,7 +66,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+void split_str(char *buf, char **array, int size, char *del);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -104,7 +109,9 @@ int main(void)
 
   printf("STM32 UART Initialized.\r\n");
 
-  HAL_UART_Receive_IT(&huart2, (uint8_t *)uart_rx_buffer, UART_BUFFER_SIZE); // Mulai menerima data
+//  HAL_UART_Receive_IT(&huart2, (uint8_t *)uart_rx_buffer, UART_BUFFER_SIZE); // Mulai menerima data
+
+  HAL_UART_Receive_IT(&huart2, (uint8_t *)&uart_rx_byte, 1);
 
   /* USER CODE END 2 */
 
@@ -115,9 +122,12 @@ int main(void)
 
 	  /* cek apabila data ready */
 	  if (data_ready) {
-		  data_ready = 0;
-		  printf("\r%s", uart_rx_buffer);
+
+		  split_str(uart_rx_buffer, array, size, ",");
+//		  printf("\r%s", uart_rx_buffer);
+		  printf("\r%s : %s : %s\n", array[0], array[1], array[2]);
 		  // parsing data GPS
+		  data_ready = 0;
 	  }
 
 	  // Non-blocking LED blink
@@ -270,10 +280,27 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-//{
-//	__NOP(); // for debugging
-//}
+/**
+  * @brief  Memisahkan string dengan delimiter
+  * @param  buf: string yang akan di split
+  * @param	array: array untuk menyimpan hasil split
+  * @param	size: ukuran dari array
+  * @param  del: delimiter yang digunakan untuk memisahkan string
+  * @retval None
+  */
+void split_str(char *buf, char **array, int size, char *del) {
+	char *token;
+	char *saveptr; // deklarasi array untuk menyimpan hasil
+	int i = 0;
+
+	token = strtok_r(buf, del, &saveptr);
+
+	while (token != NULL && i < size) {
+		array[i] = token;
+		token = strtok_r(NULL, del, &saveptr);
+		i++;
+	}
+}
 
 
 /**
@@ -282,10 +309,19 @@ static void MX_GPIO_Init(void)
   * selesai dijalankan
   */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    if (huart->Instance == USART2) {
-        data_ready = 1;  // Tandai bahwa data telah diterima
-        HAL_UART_Receive_IT(&huart2, (uint8_t *)uart_rx_buffer, UART_BUFFER_SIZE); // Restart receive
-    }
+	if (huart->Instance == USART2) {
+		// Simpan byte yang diterima ke buffer
+		if (uart_rx_byte == '\n' || uart_rx_index >= UART_BUFFER_SIZE - 1) {
+			uart_rx_buffer[uart_rx_index] = '\0'; // Tambahkan null terminator
+			data_ready = 1; // Tandai bahwa data telah diterima sepenuhnya
+			uart_rx_index = 0; // Reset indeks untuk data berikutnya
+		} else {
+			uart_rx_buffer[uart_rx_index++] = uart_rx_byte; // Simpan data ke buffer
+		}
+
+		// Restart menerima data (satu byte per kali)
+		HAL_UART_Receive_IT(&huart2, (uint8_t *)&uart_rx_byte, 1);
+	}
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
